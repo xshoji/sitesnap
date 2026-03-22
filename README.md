@@ -15,7 +15,7 @@ A web page screenshot tool with parallel multi-URL capture and lock-free Chrome 
 
 ## Requirements
 
-- Go 1.23+
+- Go 1.26+
 - Google Chrome / Chromium installed
 
 ## Installation
