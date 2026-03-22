@@ -105,7 +105,15 @@ go run main.go -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 go build -ldflags="-s -w" -trimpath -o cdpss main.go
 ```
 
+### Test
 
+```bash
+# Unit tests only (no Chrome required)
+go test -v
+
+# All tests including E2E (Chrome required)
+CHROMEDP_SCREENSHOTS_E2E=1 go test -v
+```
 
 ## License
 
