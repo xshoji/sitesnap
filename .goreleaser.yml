@@ -1,0 +1,54 @@
+version: 2
+builds:
+  - main: main.go
+    binary: cdpss
+    goos:
+      - windows
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags: 
+      - -s -w
+    # クロスコンパイル時はCGO_ENABLEDはデフォルトでは有効にならない。なので有効にしたが
+    # linux_syscall.c:67:13: error: implicit declaration of function 'setresgid' is invalid in C99
+    # がでるので今回は無効化する
+    env:
+      - CGO_ENABLED=0
+archives:
+  - id: main
+    format: zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS
+      {{- else if eq .Os "linux" }}Linux
+      {{- else if eq .Os "windows" }}Windows
+      {{- else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - README*
+      - LICENSE*
+snapshot:
+  name_template: "{{ .Tag }}-next-{{.ShortCommit}}"
+  version_template: "{{ .Tag }}-next"
+brews:
+  - name: cdpss
+    repository:
+      owner: xshoji
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/xshoji/chromedp-screenshots
+    description: A web page screenshot tool with parallel multi-URL capture and lock-free Chrome profile support, powered by chromedp (headless Chrome). Only Chrome is required — no Puppeteer, no Playwright, no Node.js, no Python.
+    install: |
+      bin.install "cdpss"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
