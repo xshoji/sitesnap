@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"regexp"
 	"sort"
 	"strings"
@@ -49,6 +50,7 @@ var (
 		debug             *bool
 		noHeadless        *bool
 		reUseProfile      *bool
+		parallel          *int
 	}{
 		flag.String("o", "" /*    */, Req+"Output path of screenshot (with multiple URLs, auto-numbered: <base>_001.png, _002.png, ...)"),
 		flag.String("q", "" /*    */, "Query selector. Screenshot the first matching element. ( e.g. -q=\".className#id\" )"),
@@ -61,6 +63,7 @@ var (
 		flag.Bool("d", false /*   */, "\nEnable debug mode"),
 		flag.Bool("n", false /*   */, "\nDisable headless mode"),
 		flag.Bool("r", false /*   */, "\nReuse cached profile (do not delete after execution)"),
+		flag.Int("t", runtime.NumCPU(), "Max number of parallel tabs for screenshot capture"),
 	}
 )
 
@@ -99,8 +102,12 @@ func main() {
 		err   error
 	}
 	results := make(chan result, len(urls))
+	sem := make(chan struct{}, *arguments.parallel)
 	for i, u := range urls {
 		go func(i int, u string) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
 			// Create a new tab context from the browser context
 			tabCtx, tabCancel := chromedp.NewContext(browserCtx)
 			defer tabCancel()
@@ -348,6 +355,7 @@ func logSettings(profileCacheDir string) {
 	log.Printf("   scale factor: %.1f", *arguments.deviceScaleFactor)
 	log.Printf("full screenshot: %v", *arguments.fullScreenshot)
 	log.Printf("       headless: %v", !*arguments.noHeadless)
+	log.Printf("       parallel: %d", *arguments.parallel)
 	for i, cf := range chromeFlags {
 		log.Printf("  chrome flag[%d]: %s", i, cf)
 	}
