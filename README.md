@@ -115,6 +115,23 @@ go test -v
 CHROMEDP_SCREENSHOTS_E2E=1 go test -v
 ```
 
+## Release
+
+The release flow for this repository is automated with GitHub Actions.
+Pushing Git tags triggers the release job.
+
+```
+# Release
+git tag v0.0.1 && git push --tags
+
+
+# Delete tag
+v="v0.0.1"; git tag -d "${v}" && git push origin :"${v}"
+
+# Delete tag and recreate new tag and push
+v="v0.0.1"; git tag -d "${v}" && git push origin :"${v}"; git tag "${v}" -m "Release "; git push --tags
+```
+
 ## License
 
 See [LICENSE](LICENSE) for details.
