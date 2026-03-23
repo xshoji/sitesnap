@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -96,19 +97,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// --- 4. Clamp parallelism for captureBeyondViewport modes ---
-	// Chrome's captureBeyondViewport capture path (used by -q) is unreliable
-	// when multiple tabs capture concurrently in the same browser process.
-	// Note: -f uses a viewport-resize approach that is safe in parallel.
-	if *arguments.querySelector != "" && *arguments.parallel > 1 {
-		log.Printf("warning: -q screenshots are unreliable across parallel tabs; forcing -t=1")
-		*arguments.parallel = 1
-	}
-
-	// --- 5. Log settings ---
+	// --- 4. Log settings ---
 	logSettings(profileCacheDir)
 
-	// --- 6. Take screenshots (parallel with separate tabs) ---
+	// --- 5. Take screenshots (parallel with separate tabs) ---
 	type result struct {
 		index int
 		err   error
@@ -146,7 +138,7 @@ func main() {
 		}
 	}
 
-	// --- 7. Cleanup ---
+	// --- 6. Cleanup ---
 	// Shut down Chrome before deleting profile to release file locks
 	shutdownBrowser()
 	cleanupProfileCache(profileCacheDir)
@@ -329,9 +321,58 @@ func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 			return nil
 		}))
 	case *arguments.querySelector != "":
+		// Get the element's bounding rect, resize viewport to contain it,
+		// then capture with a clip. This avoids captureBeyondViewport which
+		// is unreliable when multiple tabs capture concurrently.
+		qs := *arguments.querySelector
 		tasks = append(tasks,
-			chromedp.WaitVisible(*arguments.querySelector, chromedp.ByQuery),
-			chromedp.Screenshot(*arguments.querySelector, &buf, chromedp.ByQuery),
+			chromedp.WaitVisible(qs, chromedp.ByQuery),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				var rect []float64
+				if err := chromedp.Evaluate(
+					`(function(){var r=document.querySelector(`+"`"+qs+"`"+`).getBoundingClientRect();return[r.x,r.y,r.width,r.height]})()`,
+					&rect,
+				).Do(ctx); err != nil {
+					return err
+				}
+				x, y, w, h := rect[0], rect[1], rect[2], rect[3]
+				// Expand viewport so the element is fully visible
+				needW := int64(math.Ceil(x + w))
+				needH := int64(math.Ceil(y + h))
+				if needW < *arguments.windowWidth {
+					needW = *arguments.windowWidth
+				}
+				if needH < *arguments.windowHeight {
+					needH = *arguments.windowHeight
+				}
+				if err := emulation.SetDeviceMetricsOverride(
+					needW, needH, *arguments.deviceScaleFactor, false,
+				).Do(ctx); err != nil {
+					return err
+				}
+				// Re-read rect after viewport resize (layout may shift)
+				if err := chromedp.Evaluate(
+					`(function(){var r=document.querySelector(`+"`"+qs+"`"+`).getBoundingClientRect();return[r.x,r.y,r.width,r.height]})()`,
+					&rect,
+				).Do(ctx); err != nil {
+					return err
+				}
+				x, y, w, h = rect[0], rect[1], rect[2], rect[3]
+				data, err := page.CaptureScreenshot().
+					WithFormat(page.CaptureScreenshotFormatPng).
+					WithClip(&page.Viewport{
+						X: math.Round(x), Y: math.Round(y),
+						Width:  math.Round(w + x - math.Round(x)),
+						Height: math.Round(h + y - math.Round(y)),
+						Scale:  1,
+					}).
+					Do(ctx)
+				if err != nil {
+					return err
+				}
+				buf = data
+				return nil
+			}),
 		)
 	default:
 		// No selector: capture the entire viewport
