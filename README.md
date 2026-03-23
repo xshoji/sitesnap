@@ -64,24 +64,24 @@ cds -u <URL> -o /tmp/screenshot.png [options]
 
 ```bash
 # Viewport screenshot
-cdpss -u="https://www.example.com/" -wi=1280 -he=800 -o=/tmp/example.png
+cds -u="https://www.example.com/" -wi=1280 -he=800 -o=/tmp/example.png
 
 # Element screenshot with CSS selector
-cdpss -u="https://news.yahoo.co.jp/" -q="#liveStream" -o="/tmp/livestream.png"
+cds -u="https://news.yahoo.co.jp/" -q="#liveStream" -o="/tmp/livestream.png"
 
 # Full-page screenshot
-cdpss -u="https://www.example.com/" -f -o=/tmp/fullpage.png
+cds -u="https://www.example.com/" -f -o=/tmp/fullpage.png
 
 # Multiple URLs (parallel capture)
-cdpss -u="https://www.yahoo.co.jp/" -u="https://www.google.com/" -o=/tmp/sites.png
+cds -u="https://www.yahoo.co.jp/" -u="https://www.google.com/" -o=/tmp/sites.png
 
 # With Chrome profile (for logged-in sessions)
-cdpss -u="https://example.com/dashboard" \
+cds -u="https://example.com/dashboard" \
   -p="/Users/you/Library/Application Support/Google/Chrome/Default" \
   -r -o=/tmp/dashboard.png
 
 # Custom Chrome flags
-cdpss -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
+cds -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 ```
 
 ### Details of the -p flag and the Google Chrome profile directory
@@ -99,7 +99,7 @@ cdpss -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 - **Icon fonts showing as ✕ marks** — Web fonts (e.g., Font Awesome, Material Icons) may not finish loading within the default wait time. Try increasing `-w` (e.g., `-w 10`).
 - **Custom DNS resolution** — Use `-c` with `host-resolver-rules` to override DNS resolution:
   ```bash
-  cdpss -u="https://example.com/" \
+  cds -u="https://example.com/" \
     -c "host-resolver-rules=MAP example.com 127.0.0.1" \
     -o=/tmp/screenshot.png
   ```
@@ -115,7 +115,7 @@ cdpss -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 ### Build
 
 ```bash
-go build -ldflags="-s -w" -trimpath -o cdpss main.go
+go build -ldflags="-s -w" -trimpath -o cds main.go
 ```
 
 ### Test
@@ -142,7 +142,7 @@ git tag v0.0.1 && git push --tags
 v="v0.0.1"; git tag -d "${v}" && git push origin :"${v}"
 
 # Delete tag and recreate new tag and push
-v="v0.0.1"; git tag -d "${v}" && git push origin :"${v}"; git tag "${v}" -m "Release "; git push --tags
+v="v0.0.1"; git tag -d "${v}" && git push origin :"${v}"; git tag "${v}"; git push --tags
 ```
 
 ## License
