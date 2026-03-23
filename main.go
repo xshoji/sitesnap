@@ -271,35 +271,63 @@ func newBrowserContext() (context.Context, func()) {
 }
 
 // takeScreenshot navigates to the URL and captures a screenshot.
+// All chromedp actions run in a single Run call to avoid race conditions
+// when multiple tabs operate concurrently.
 func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
-	// Set viewport -> navigate -> wait
-	if err := chromedp.Run(ctx,
+	// Build and execute all tasks in one Run call
+	tasks := chromedp.Tasks{
 		emulation.SetDeviceMetricsOverride(
 			*arguments.windowWidth,
 			*arguments.windowHeight,
 			*arguments.deviceScaleFactor,
 			false,
 		),
-		// Use page.Navigate directly to avoid hanging on pages
-		// that never fire the load event within a constrained viewport.
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			_, _, _, _, err := page.Navigate(url).Do(ctx)
 			return err
 		}),
-		chromedp.Sleep(time.Duration(*arguments.waitSeconds)*time.Second),
-	); err != nil {
-		return nil, err
+		chromedp.Sleep(time.Duration(*arguments.waitSeconds) * time.Second),
 	}
 
-	// Capture
+	var buf []byte
 	switch {
 	case *arguments.fullScreenshot:
-		return captureFullPage(ctx)
+		tasks = append(tasks, chromedp.ActionFunc(func(ctx context.Context) error {
+			data, err := captureFullPage(ctx)
+			if err != nil {
+				return err
+			}
+			buf = data
+			return nil
+		}))
 	case *arguments.querySelector != "":
-		return captureElement(ctx, *arguments.querySelector)
+		qs := *arguments.querySelector
+		tasks = append(tasks,
+			chromedp.WaitVisible(qs, chromedp.ByQuery),
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				data, err := captureElement(ctx, qs)
+				if err != nil {
+					return err
+				}
+				buf = data
+				return nil
+			}),
+		)
 	default:
-		return captureViewport(ctx, nil)
+		tasks = append(tasks, chromedp.ActionFunc(func(ctx context.Context) error {
+			data, err := captureViewport(ctx, nil)
+			if err != nil {
+				return err
+			}
+			buf = data
+			return nil
+		}))
 	}
+
+	if err := chromedp.Run(ctx, tasks); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 // captureFullPage resizes the viewport to the full page dimensions and takes
@@ -327,15 +355,10 @@ func captureFullPage(ctx context.Context) ([]byte, error) {
 // captures it with a clip rect. This avoids captureBeyondViewport which is
 // unreliable when multiple tabs capture concurrently.
 func captureElement(ctx context.Context, selector string) ([]byte, error) {
-	if err := chromedp.WaitVisible(selector, chromedp.ByQuery).Do(ctx); err != nil {
-		return nil, err
-	}
-
 	x, y, w, h, err := getElementRect(ctx, selector)
 	if err != nil {
 		return nil, err
 	}
-	// Expand viewport so the element is fully visible
 	needW := max(*arguments.windowWidth, int64(math.Ceil(x+w)))
 	needH := max(*arguments.windowHeight, int64(math.Ceil(y+h)))
 	if err := emulation.SetDeviceMetricsOverride(
@@ -343,8 +366,6 @@ func captureElement(ctx context.Context, selector string) ([]byte, error) {
 	).Do(ctx); err != nil {
 		return nil, err
 	}
-
-	// Re-read rect after viewport resize (layout may shift)
 	x, y, w, h, err = getElementRect(ctx, selector)
 	if err != nil {
 		return nil, err
