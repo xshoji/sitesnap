@@ -96,10 +96,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// --- 4. Log settings ---
+	// --- 4. Clamp parallelism for captureBeyondViewport modes ---
+	// Chrome's captureBeyondViewport capture path (used by -q) is unreliable
+	// when multiple tabs capture concurrently in the same browser process.
+	// Note: -f uses a viewport-resize approach that is safe in parallel.
+	if *arguments.querySelector != "" && *arguments.parallel > 1 {
+		log.Printf("warning: -q screenshots are unreliable across parallel tabs; forcing -t=1")
+		*arguments.parallel = 1
+	}
+
+	// --- 5. Log settings ---
 	logSettings(profileCacheDir)
 
-	// --- 5. Take screenshots (parallel with separate tabs) ---
+	// --- 6. Take screenshots (parallel with separate tabs) ---
 	type result struct {
 		index int
 		err   error
@@ -137,7 +146,7 @@ func main() {
 		}
 	}
 
-	// --- 6. Cleanup ---
+	// --- 7. Cleanup ---
 	// Shut down Chrome before deleting profile to release file locks
 	shutdownBrowser()
 	cleanupProfileCache(profileCacheDir)
@@ -287,7 +296,38 @@ func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 	// Wait & capture
 	switch {
 	case *arguments.fullScreenshot:
-		tasks = append(tasks, chromedp.FullScreenshot(&buf, 100))
+		// Resize the viewport to the full page height, then take a normal
+		// viewport screenshot. This avoids captureBeyondViewport which is
+		// unreliable when multiple tabs capture concurrently.
+		tasks = append(tasks, chromedp.ActionFunc(func(ctx context.Context) error {
+			var dims []int64
+			if err := chromedp.Evaluate(
+				`[document.documentElement.scrollWidth, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)]`,
+				&dims,
+			).Do(ctx); err != nil {
+				return err
+			}
+			fullWidth, fullHeight := dims[0], dims[1]
+			// Use page width from settings but expand height to full content
+			w := *arguments.windowWidth
+			if fullWidth > w {
+				w = fullWidth
+			}
+			if err := emulation.SetDeviceMetricsOverride(
+				w,
+				fullHeight,
+				*arguments.deviceScaleFactor,
+				false,
+			).Do(ctx); err != nil {
+				return err
+			}
+			data, err := page.CaptureScreenshot().WithFormat(page.CaptureScreenshotFormatPng).Do(ctx)
+			if err != nil {
+				return err
+			}
+			buf = data
+			return nil
+		}))
 	case *arguments.querySelector != "":
 		tasks = append(tasks,
 			chromedp.WaitVisible(*arguments.querySelector, chromedp.ByQuery),
