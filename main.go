@@ -265,18 +265,16 @@ func newBrowserContext() (context.Context, func()) {
 func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 	var buf []byte
 
-	// Set viewport
-	if err := chromedp.Run(ctx, emulation.SetDeviceMetricsOverride(
-		*arguments.windowWidth,
-		*arguments.windowHeight,
-		*arguments.deviceScaleFactor,
-		false,
-	)); err != nil {
-		return nil, err
-	}
-
-	// Build tasks: navigate -> wait -> capture
+	// Build tasks: set viewport -> navigate -> wait -> capture
+	// All steps run in a single Run call to avoid race conditions
+	// when multiple tabs set viewport metrics concurrently.
 	tasks := chromedp.Tasks{
+		emulation.SetDeviceMetricsOverride(
+			*arguments.windowWidth,
+			*arguments.windowHeight,
+			*arguments.deviceScaleFactor,
+			false,
+		),
 		// Use page.Navigate directly to avoid hanging on pages
 		// that never fire the load event within a constrained viewport.
 		chromedp.ActionFunc(func(ctx context.Context) error {
