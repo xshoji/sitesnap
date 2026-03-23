@@ -36,6 +36,10 @@ var version = "dev"
 
 const (
 	Req = "\x1b[33m(required)\x1b[0m "
+	// maxViewportDim is the maximum viewport dimension (in CSS pixels) that
+	// Chrome's compositor can handle without tiling artifacts. The GPU
+	// texture limit is typically 16384px; we use a conservative value.
+	maxViewportDim int64 = 16384
 )
 
 var (
@@ -305,6 +309,13 @@ func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 			if fullWidth > w {
 				w = fullWidth
 			}
+			// Clamp to Chrome's max texture size to avoid tiling artifacts
+			if w > maxViewportDim {
+				w = maxViewportDim
+			}
+			if fullHeight > maxViewportDim {
+				fullHeight = maxViewportDim
+			}
 			if err := emulation.SetDeviceMetricsOverride(
 				w,
 				fullHeight,
@@ -344,6 +355,13 @@ func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 				}
 				if needH < *arguments.windowHeight {
 					needH = *arguments.windowHeight
+				}
+				// Clamp to Chrome's max texture size to avoid tiling artifacts
+				if needW > maxViewportDim {
+					needW = maxViewportDim
+				}
+				if needH > maxViewportDim {
+					needH = maxViewportDim
 				}
 				if err := emulation.SetDeviceMetricsOverride(
 					needW, needH, *arguments.deviceScaleFactor, false,
