@@ -3,8 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"flag"
 	"fmt"
+	"html"
+	"image"
+	"image/draw"
+	"image/png"
 	"log"
 	"math"
 	"os"
@@ -54,6 +59,7 @@ var (
 		windowHeight      *int64
 		deviceScaleFactor *float64
 		fullScreenshot    *bool
+		showAddressBar    *bool
 		debug             *bool
 		noHeadless        *bool
 		reUseProfile      *bool
@@ -67,6 +73,7 @@ var (
 		flag.Int64("he", 860 /*   */, "Viewport height (affects page layout, e.g. responsive design). Without -q, this is the output image height"),
 		flag.Float64("s", 2.0 /* */, "Device scale factor (2.0 = Retina)"),
 		flag.Bool("f", false /*   */, "\nEnable full screenshot mode"),
+		flag.Bool("b", false /*   */, "\nAdd browser-style address bar to the top of screenshot"),
 		flag.Bool("d", false /*   */, "\nEnable debug mode"),
 		flag.Bool("n", false /*   */, "\nDisable headless mode"),
 		flag.Bool("r", false /*   */, "\nReuse cached profile (do not delete after execution)"),
@@ -340,6 +347,13 @@ func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 	if err := chromedp.Run(ctx, tasks); err != nil {
 		return nil, err
 	}
+	if *arguments.showAddressBar {
+		combined, err := addAddressBar(ctx, url, buf)
+		if err != nil {
+			return nil, err
+		}
+		buf = combined
+	}
 	return buf, nil
 }
 
@@ -416,6 +430,85 @@ func getElementRect(ctx context.Context, selector string) (x, y, w, h float64, e
 		return
 	}
 	return rect[0], rect[1], rect[2], rect[3], nil
+}
+
+// addAddressBar renders a browser-style address bar with favicon and URL using
+// chromedp, then stitches it on top of the page screenshot.
+func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte, error) {
+	// Get favicon URL from current page (still on the target page)
+	var faviconURL string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(
+		`(function(){var el=document.querySelector('link[rel*="icon"]');return el?el.href:(location.origin+'/favicon.ico')})()`,
+		&faviconURL,
+	)); err != nil {
+		faviconURL = ""
+	}
+
+	// Decode page screenshot to get pixel dimensions
+	pageImg, err := png.Decode(bytes.NewReader(pageBuf))
+	if err != nil {
+		return nil, fmt.Errorf("decode page screenshot: %w", err)
+	}
+	pageW := pageImg.Bounds().Dx()
+
+	// Calculate CSS width to match the page screenshot pixel width
+	cssW := int64(math.Round(float64(pageW) / *arguments.deviceScaleFactor))
+	const barCSSH int64 = 52
+
+	// Build address bar HTML and capture it in the same tab
+	barHTML := buildAddressBarHTML(pageURL, faviconURL)
+	dataURL := "data:text/html;base64," + base64.StdEncoding.EncodeToString([]byte(barHTML))
+
+	var barBuf []byte
+	if err := chromedp.Run(ctx,
+		emulation.SetDeviceMetricsOverride(cssW, barCSSH, *arguments.deviceScaleFactor, false),
+		chromedp.Navigate(dataURL),
+		chromedp.Sleep(500*time.Millisecond),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			data, err := captureViewport(ctx, nil)
+			if err != nil {
+				return err
+			}
+			barBuf = data
+			return nil
+		}),
+	); err != nil {
+		return nil, fmt.Errorf("capture address bar: %w", err)
+	}
+
+	// Decode bar screenshot
+	barImg, err := png.Decode(bytes.NewReader(barBuf))
+	if err != nil {
+		return nil, fmt.Errorf("decode bar screenshot: %w", err)
+	}
+
+	// Stitch: bar on top, page below
+	barB := barImg.Bounds()
+	pageB := pageImg.Bounds()
+	result := image.NewRGBA(image.Rect(0, 0, pageB.Dx(), barB.Dy()+pageB.Dy()))
+	draw.Draw(result, image.Rect(0, 0, barB.Dx(), barB.Dy()), barImg, barB.Min, draw.Src)
+	draw.Draw(result, image.Rect(0, barB.Dy(), pageB.Dx(), barB.Dy()+pageB.Dy()), pageImg, pageB.Min, draw.Src)
+
+	var out bytes.Buffer
+	if err := png.Encode(&out, result); err != nil {
+		return nil, fmt.Errorf("encode combined screenshot: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
+// buildAddressBarHTML returns an HTML page that renders a browser-style address bar.
+func buildAddressBarHTML(pageURL, faviconURL string) string {
+	escapedURL := html.EscapeString(pageURL)
+	imgTag := ""
+	if faviconURL != "" {
+		imgTag = fmt.Sprintf(`<img src="%s" width="16" height="16" style="margin-right:8px;flex-shrink:0" onerror="this.style.display='none'">`, html.EscapeString(faviconURL))
+	}
+	return fmt.Sprintf(`<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}`+
+		`body{background:#dee1e6;display:flex;align-items:center;height:52px;padding:0 8px}`+
+		`.bar{display:flex;align-items:center;flex:1;height:36px;padding:0 12px;background:#fff;border-radius:24px;`+
+		`font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;overflow:hidden}`+
+		`.url{color:#202124;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`+
+		`</style></head><body><div class="bar">%s<span class="url">%s</span></div></body></html>`, imgTag, escapedURL)
 }
 
 // clampDim clamps a CSS dimension to Chrome's max texture size to avoid tiling artifacts.

@@ -54,6 +54,7 @@ cds -u <URL> -o /tmp/screenshot.png [options]
 | `-he` | `860` | Viewport height |
 | `-s` | `2.0` | Device scale factor (2.0 = Retina) |
 | `-f` | `false` | Enable full-page screenshot |
+| `-b` | `false` | Add browser-style address bar (favicon + URL) to the top of screenshot |
 | `-d` | `false` | Enable debug mode |
 | `-n` | `false` | Disable headless mode (show browser window) |
 | `-r` | `false` | Reuse cached profile (do not delete after execution) |
@@ -79,6 +80,9 @@ cds -u="https://www.yahoo.co.jp/" -u="https://www.google.com/" -o=/tmp/sites.png
 cds -u="https://example.com/dashboard" \
   -p="/Users/you/Library/Application Support/Google/Chrome/Default" \
   -r -o=/tmp/dashboard.png
+
+# With browser-style address bar
+cds -u="https://www.example.com/" -b -o=/tmp/with_bar.png
 
 # Custom Chrome flags
 cds -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
