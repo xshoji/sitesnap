@@ -441,13 +441,32 @@ func getElementRect(ctx context.Context, selector string) (x, y, w, h float64, e
 // addAddressBar renders a browser-style address bar with favicon and URL using
 // chromedp, then stitches it on top of the page screenshot.
 func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte, error) {
-	// Get favicon URL from current page (still on the target page)
-	var faviconURL string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(
-		`(function(){var el=document.querySelector('link[rel*="icon"]');return el?el.href:(location.origin+'/favicon.ico')})()`,
-		&faviconURL,
+	// Get favicon as a data URI from current page (still on the target page).
+	// Fetches the favicon and converts it to a data URI so it can be embedded
+	// in the address bar HTML (which is loaded via a data: URL where external
+	// resources cannot be fetched). Also handles favicons already defined as
+	// data URIs (e.g. <link rel="icon" href="data:image/png;base64,...">).
+	var faviconDataURL string
+	if err := chromedp.Run(ctx, chromedp.EvaluateAsDevTools(
+		`(async function(){`+
+			`var el=document.querySelector('link[rel*="icon"]');`+
+			`var url=el?el.href:(location.origin+'/favicon.ico');`+
+			`if(url.startsWith('data:'))return url;`+
+			`try{`+
+			`var r=await fetch(url);`+
+			`var b=await r.blob();`+
+			`if(b.size===0)return '';`+
+			`return await new Promise(function(ok){`+
+			`var rd=new FileReader();`+
+			`rd.onload=function(){ok(rd.result)};`+
+			`rd.onerror=function(){ok('')};`+
+			`rd.readAsDataURL(b)`+
+			`})`+
+			`}catch(e){return ''}`+
+			`})()`,
+		&faviconDataURL,
 	)); err != nil {
-		faviconURL = ""
+		faviconDataURL = ""
 	}
 
 	// Decode page screenshot to get pixel dimensions
@@ -462,7 +481,7 @@ func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte,
 	const barCSSH int64 = 52
 
 	// Build address bar HTML and capture it in the same tab
-	barHTML := buildAddressBarHTML(pageURL, faviconURL)
+	barHTML := buildAddressBarHTML(pageURL, faviconDataURL)
 	dataURL := "data:text/html;base64," + base64.StdEncoding.EncodeToString([]byte(barHTML))
 
 	var barBuf []byte
