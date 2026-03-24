@@ -111,11 +111,8 @@ func main() {
 	}
 	results := make(chan result, len(urls))
 	sem := make(chan struct{}, *arguments.parallel)
-	var wg sync.WaitGroup
 	for i, u := range urls {
-		wg.Add(1)
 		go func(i int, u string) {
-			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -144,7 +141,6 @@ func main() {
 			log.Fatal(r.err)
 		}
 	}
-	wg.Wait()
 
 	// --- 6. Cleanup ---
 	// Shut down Chrome before deleting profile to release file locks
@@ -282,9 +278,27 @@ func takeScreenshot(ctx context.Context, url string) ([]byte, error) {
 			*arguments.deviceScaleFactor,
 			false,
 		),
+		// Use page.Navigate directly to avoid hanging on pages
+		// that never fire the load event within a constrained viewport.
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			_, _, _, _, err := page.Navigate(url).Do(ctx)
 			return err
+		}),
+		// Wait for navigation to actually commit before starting the user-specified delay.
+		// Raw page.Navigate returns immediately; without this check, parallel tabs
+		// may still be on about:blank when the screenshot fires.
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			for i := 0; i < 100; i++ {
+				var readyState string
+				if err := chromedp.Evaluate(`document.readyState`, &readyState).Do(ctx); err != nil {
+					return err
+				}
+				if readyState == "interactive" || readyState == "complete" {
+					return nil
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			return nil
 		}),
 		chromedp.Sleep(time.Duration(*arguments.waitSeconds) * time.Second),
 	}
@@ -354,11 +368,13 @@ func captureFullPage(ctx context.Context) ([]byte, error) {
 // captureElement expands the viewport to contain the target element, then
 // captures it with a clip rect. This avoids captureBeyondViewport which is
 // unreliable when multiple tabs capture concurrently.
+// Caller must ensure the selector is already present/visible (e.g. via WaitVisible).
 func captureElement(ctx context.Context, selector string) ([]byte, error) {
 	x, y, w, h, err := getElementRect(ctx, selector)
 	if err != nil {
 		return nil, err
 	}
+	// Expand viewport so the element is fully visible
 	needW := max(*arguments.windowWidth, int64(math.Ceil(x+w)))
 	needH := max(*arguments.windowHeight, int64(math.Ceil(y+h)))
 	if err := emulation.SetDeviceMetricsOverride(
@@ -366,6 +382,7 @@ func captureElement(ctx context.Context, selector string) ([]byte, error) {
 	).Do(ctx); err != nil {
 		return nil, err
 	}
+	// Re-read rect after viewport resize (layout may shift)
 	x, y, w, h, err = getElementRect(ctx, selector)
 	if err != nil {
 		return nil, err
