@@ -94,6 +94,10 @@ cds -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 - Without `-r`, the cached copy is deleted after each run for idempotency. With `-r`, it is kept for reuse.
 
 
+### Limitations
+
+- **Full-page screenshot size limit** — Full-page (`-f`) and element (`-q`) screenshots are limited by Chrome's GPU texture size of 16384 physical pixels per axis. With the default scale factor (`-s 2.0`), this means pages taller or wider than **8192 CSS pixels** will be clipped. At `-s 1.0`, the limit is 16384 CSS pixels.
+
 ### Tips
 
 - **Icon fonts showing as ✕ marks** — Web fonts (e.g., Font Awesome, Material Icons) may not finish loading within the default wait time. Try increasing `-w` (e.g., `-w 10`).

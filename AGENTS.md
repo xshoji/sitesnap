@@ -61,7 +61,7 @@ The same approach is applied to `-q` (element screenshots): we expand the viewpo
 
 ## Constants
 
-- `maxViewportDim = 16384` — Maximum viewport dimension in CSS pixels. Chrome's GPU texture limit. Exceeding this causes tiling artifacts. Both `-f` and `-q` modes clamp to this value.
+- `maxPhysicalDim = 16384` — Chrome's GPU texture limit in **physical pixels**. The effective CSS pixel limit is `floor(16384 / deviceScaleFactor)` (e.g., 8192 CSS px at scale 2.0). Both `-f` and `-q` modes clamp to this derived value.
 
 ## Testing
 

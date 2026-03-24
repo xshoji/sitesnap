@@ -36,10 +36,9 @@ var version = "dev"
 
 const (
 	Req = "\x1b[33m(required)\x1b[0m "
-	// maxViewportDim is the maximum viewport dimension (in CSS pixels) that
-	// Chrome's compositor can handle without tiling artifacts. The GPU
-	// texture limit is typically 16384px; we use a conservative value.
-	maxViewportDim int64 = 16384
+	// maxPhysicalDim is Chrome's GPU texture limit in physical pixels.
+	// The actual CSS pixel limit depends on deviceScaleFactor.
+	maxPhysicalDim int64 = 16384
 )
 
 var (
@@ -419,9 +418,11 @@ func getElementRect(ctx context.Context, selector string) (x, y, w, h float64, e
 	return rect[0], rect[1], rect[2], rect[3], nil
 }
 
-// clampDim clamps a dimension to Chrome's max texture size to avoid tiling artifacts.
+// clampDim clamps a CSS dimension to Chrome's max texture size to avoid tiling artifacts.
+// The GPU limit is in physical pixels, so we divide by deviceScaleFactor.
 func clampDim(v int64) int64 {
-	return min(v, maxViewportDim)
+	maxCSS := int64(math.Floor(float64(maxPhysicalDim) / *arguments.deviceScaleFactor))
+	return min(v, maxCSS)
 }
 
 // removeStaleChromeLocks removes lock files left by previous crashed runs.
