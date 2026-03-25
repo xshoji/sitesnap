@@ -97,8 +97,9 @@ cps -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 > https://chromium.googlesource.com/chromium/src/+/HEAD/docs/user_data_dir.md  
 
 - The `-p` flag specifies a Chrome profile directory to copy and use for the screenshot session. This allows you to capture pages with your logged-in session without locking your main browser.
-- The profile is copied to an isolated cache directory (`~/.chromedpscreenshots/`), so the original profile is never modified.
-- Without `-r`, the cached copy is deleted after each run for idempotency. With `-r`, it is kept for reuse.
+- The original profile is never modified — it is always copied to an isolated directory.
+- **Without `-r`**: the profile is copied to a system temporary directory (e.g., `/tmp/chromedpscreenshots-userdata-*`) and automatically deleted after each run. Your home directory is never touched.
+- **With `-r`**: the profile is copied to a persistent cache directory (`~/.chromedpscreenshots/`, overridable via `CHROMEDP_SCREENSHOTS_CACHE_DIR`) and kept for reuse across runs.
 
 
 ### Limitations
@@ -119,7 +120,7 @@ cps -u="https://example.com/" -c "lang=ja" -c "disable-extensions"
 
 | Variable | Description |
 |----------|-------------|
-| `CHROMEDP_SCREENSHOTS_CACHE_DIR` | Override the default profile cache directory (`~/.chromedpscreenshots`) |
+| `CHROMEDP_SCREENSHOTS_CACHE_DIR` | Override the default persistent profile cache directory used with `-r` (default: `~/.chromedpscreenshots`) |
 
 ## Development
 
