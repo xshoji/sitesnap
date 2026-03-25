@@ -24,6 +24,7 @@ import (
 
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -454,17 +455,21 @@ func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte,
 			`if(url.startsWith('data:'))return url;`+
 			`try{`+
 			`var r=await fetch(url);`+
+			`if(!r.ok)return '';`+
 			`var b=await r.blob();`+
 			`if(b.size===0)return '';`+
 			`return await new Promise(function(ok){`+
 			`var rd=new FileReader();`+
 			`rd.onload=function(){ok(rd.result)};`+
-			`rd.onerror=function(){ok('')};`+
+			`rd.onerror=rd.onabort=function(){ok('')};`+
 			`rd.readAsDataURL(b)`+
 			`})`+
 			`}catch(e){return ''}`+
 			`})()`,
 		&faviconDataURL,
+		func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
+			return p.WithAwaitPromise(true)
+		},
 	)); err != nil {
 		faviconDataURL = ""
 	}
