@@ -471,10 +471,16 @@ func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte,
     return true;
   });
 
+  // stripDarkMode removes @media (prefers-color-scheme: dark) blocks from SVG
+  // to prevent favicons from rendering as white-on-white in the address bar.
+  function stripDarkMode(svgText) {
+    return svgText.replace(/@media\s*\(\s*prefers-color-scheme:\s*dark\s*\)\s*\{[^}]*\{[^}]*\}\s*\}/g, '');
+  }
+
   // Try data: URIs first (instant, no fetch needed)
   for (var i = 0; i < cs.length; i++) {
-    if (cs[i].startsWith('data:') && cs[i].indexOf('image/svg') !== -1) {
-      // Decode inline SVG data URI and strip dark mode
+    if (!cs[i].startsWith('data:')) continue;
+    if (cs[i].indexOf('image/svg') !== -1) {
       try {
         var svgContent;
         if (cs[i].indexOf(';base64,') !== -1) {
@@ -482,28 +488,15 @@ func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte,
         } else {
           svgContent = decodeURIComponent(cs[i].split(',').slice(1).join(','));
         }
-        svgContent = stripDarkMode(svgContent);
-        return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgContent)));
+        return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(stripDarkMode(svgContent))));
       } catch(e) { return cs[i]; }
     }
-    if (cs[i].startsWith('data:')) return cs[i];
+    return cs[i];
   }
 
-  // stripDarkMode removes @media (prefers-color-scheme: dark) blocks from SVG
-  // to prevent favicons from rendering as white-on-white in the address bar.
-  function stripDarkMode(svgText) {
-    return svgText.replace(/@media\s*\(\s*prefers-color-scheme:\s*dark\s*\)\s*\{[^}]*\{[^}]*\}\s*\}/g, '');
-  }
-  function toDataURL(blob) {
-    return new Promise(function(ok) {
-      var rd = new FileReader();
-      rd.onload = function() { ok(rd.result); };
-      rd.onerror = rd.onabort = function() { ok(''); };
-      rd.readAsDataURL(blob);
-    });
-  }
-
-  // Try each URL-based candidate until one succeeds
+  // Try each URL-based candidate
+  // If fetch succeeds: convert to data URL (SVG: strip dark mode first)
+  // If fetch fails (CORS etc.): use the URL directly in <img> tag
   for (var i = 0; i < cs.length; i++) {
     if (cs[i].startsWith('data:')) continue;
     try {
@@ -511,16 +504,21 @@ func addAddressBar(ctx context.Context, pageURL string, pageBuf []byte) ([]byte,
       if (!r.ok) continue;
       var b = await r.blob();
       if (b.size === 0) continue;
-      // For SVG favicons, strip dark mode media queries to avoid white-on-white
       if (b.type === 'image/svg+xml' || cs[i].endsWith('.svg')) {
         var svgText = await b.text();
-        svgText = stripDarkMode(svgText);
-        var result = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgText)));
-        if (result) return result;
+        return 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(stripDarkMode(svgText))));
       }
-      var result = await toDataURL(b);
+      var result = await new Promise(function(ok) {
+        var rd = new FileReader();
+        rd.onload = function() { ok(rd.result); };
+        rd.onerror = rd.onabort = function() { ok(''); };
+        rd.readAsDataURL(b);
+      });
       if (result) return result;
-    } catch (e) { continue; }
+    } catch (e) {
+      // CORS or network error: return the URL directly for <img> tag
+      return cs[i];
+    }
   }
   return '';
 })()`,
