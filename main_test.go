@@ -69,16 +69,16 @@ func TestOutputPath_MultipleURLs(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestChromeProfileCacheRoot_EnvVar(t *testing.T) {
-	t.Setenv("CHROMEDP_SCREENSHOTS_CACHE_DIR", "/custom/cache")
+	t.Setenv("SITESNAP_CACHE_DIR", "/custom/cache")
 	if got := chromeProfileCacheRoot(); got != "/custom/cache" {
 		t.Errorf("chromeProfileCacheRoot() = %q, want /custom/cache", got)
 	}
 }
 
 func TestChromeProfileCacheRoot_Default(t *testing.T) {
-	t.Setenv("CHROMEDP_SCREENSHOTS_CACHE_DIR", "")
+	t.Setenv("SITESNAP_CACHE_DIR", "")
 	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".chromedpscreenshots")
+	want := filepath.Join(home, ".sitesnap")
 	if got := chromeProfileCacheRoot(); got != want {
 		t.Errorf("chromeProfileCacheRoot() = %q, want %q", got, want)
 	}
@@ -136,7 +136,7 @@ func TestSetupProfileCache_CopiesProfileToTempDir(t *testing.T) {
 
 func TestSetupProfileCache_ReUseExisting(t *testing.T) {
 	cacheRoot := t.TempDir()
-	t.Setenv("CHROMEDP_SCREENSHOTS_CACHE_DIR", cacheRoot)
+	t.Setenv("SITESNAP_CACHE_DIR", cacheRoot)
 
 	srcDir := t.TempDir()
 	setProfileDir(srcDir)
@@ -199,13 +199,13 @@ func TestCleanupProfileCache_KeepsWhenReuse(t *testing.T) {
 // E2E tests (Chrome required)
 //
 // Run manually:
-//   CHROMEDP_SCREENSHOTS_E2E=1 go test -v -run TestE2E
+//   SITESNAP_E2E=1 go test -v -run TestE2E
 // ---------------------------------------------------------------------------
 
 func skipUnlessE2E(t *testing.T) {
 	t.Helper()
-	if os.Getenv("CHROMEDP_SCREENSHOTS_E2E") == "" {
-		t.Skip("Skipping E2E test; set CHROMEDP_SCREENSHOTS_E2E=1 to run")
+	if os.Getenv("SITESNAP_E2E") == "" {
+		t.Skip("Skipping E2E test; set SITESNAP_E2E=1 to run")
 	}
 }
 

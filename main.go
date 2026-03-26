@@ -24,9 +24,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -50,7 +52,7 @@ const (
 )
 
 var (
-	commandDescription = "A fast, multi-page screenshot tool that requires only Chrome. Supports profile specification without locking your main browser.\n  Set CHROMEDP_SCREENSHOTS_CACHE_DIR to override the default profile cache directory (~/.chromedpscreenshot).\n  Device scale factor can be changed via -c \"device-scale-factor=1.0\" (default: 2.0 Retina).\n  Custom DNS resolution via -c \"host-resolver-rules=MAP example.com 127.0.0.1\"."
+	commandDescription = "A fast, multi-page screenshot tool that requires only Chrome. Supports profile specification without locking your main browser.\n  Set SITESNAP_CACHE_DIR to override the default profile cache directory (~/.sitesnap).\n  Device scale factor can be changed via -c \"device-scale-factor=1.0\" (default: 2.0 Retina).\n  Custom DNS resolution via -c \"host-resolver-rules=MAP example.com 127.0.0.1\"."
 	urls               stringSlice
 	chromeFlags        stringSlice
 	deviceScaleFactor  = 2.0
@@ -249,7 +251,7 @@ func setupProfileCache() string {
 	}
 
 	// Non-reuse mode: use a temporary directory
-	userDataDir, err := os.MkdirTemp("", "chromedpscreenshots-userdata-")
+	userDataDir, err := os.MkdirTemp("", "sitesnap-userdata-")
 	if err != nil {
 		log.Fatalf("failed to create temp dir: %v", err)
 	}
@@ -307,6 +309,12 @@ func newBrowserContext(userDataDir string) (context.Context, func()) {
 	var once sync.Once
 	shutdown := func() {
 		once.Do(func() {
+			// Close all tabs via CDP before shutting down to keep the session clean
+			closeAllTargets(browserCtx)
+			// Gracefully close Chrome via CDP to avoid "didn't shut down correctly" warning
+			if err := chromedp.Cancel(browserCtx); err != nil {
+				log.Printf("graceful browser close failed: %v", err)
+			}
 			browserCancel()
 			allocCancel()
 		})
@@ -640,6 +648,24 @@ func clampDim(v int64) int64 {
 	return min(v, maxCSS)
 }
 
+// closeAllTargets closes all page targets via CDP so no tabs remain in the
+// session history. This prevents leftover tabs when reusing a profile with -r.
+func closeAllTargets(ctx context.Context) {
+	targets, err := chromedp.Targets(ctx)
+	if err != nil {
+		return
+	}
+	c := chromedp.FromContext(ctx)
+	if c == nil || c.Browser == nil {
+		return
+	}
+	for _, t := range targets {
+		if t.Type == "page" {
+			target.CloseTarget(t.TargetID).Do(cdp.WithExecutor(ctx, c.Browser))
+		}
+	}
+}
+
 // removeStaleChromeLocks removes lock files left by previous crashed runs.
 func removeStaleChromeLocks(userDataDir string) {
 	for _, name := range []string{"SingletonLock", "SingletonCookie", "SingletonSocket"} {
@@ -662,16 +688,16 @@ func cleanupProfileCache(cacheDir string) {
 }
 
 // chromeProfileCacheRoot returns the root directory for cached Chrome profiles.
-// Can be overridden by the CHROMEDP_SCREENSHOTS_CACHE_DIR environment variable.
+// Can be overridden by the SITESNAP_CACHE_DIR environment variable.
 func chromeProfileCacheRoot() string {
-	if dir := os.Getenv("CHROMEDP_SCREENSHOTS_CACHE_DIR"); dir != "" {
+	if dir := os.Getenv("SITESNAP_CACHE_DIR"); dir != "" {
 		return dir
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		log.Fatalf("failed to get user home directory: %v", err)
 	}
-	return filepath.Join(homeDir, ".chromedpscreenshots")
+	return filepath.Join(homeDir, ".sitesnap")
 }
 
 func logSettings(profileCacheDir string) {
