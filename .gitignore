@@ -33,5 +33,4 @@ go.work.sum
 
 # build
 
-cps
-chromedp-screenshots
+sitesnap
