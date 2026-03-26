@@ -138,47 +138,66 @@ func main() {
 	// --- 4. Log settings ---
 	logSettings(profileCacheDir)
 
-	// --- 5. Take screenshots (parallel with separate tabs) ---
-	type result struct {
-		index int
-		err   error
-	}
-	results := make(chan result, len(urls))
-	sem := make(chan struct{}, *arguments.parallel)
-	for i, u := range urls {
-		go func(i int, u string) {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// Create a new tab context from the browser context
-			tabCtx, tabCancel := chromedp.NewContext(browserCtx)
-			defer tabCancel()
-
-			log.Printf("[%d/%d] capturing: %s", i+1, len(urls), u)
-			buf, err := takeScreenshot(tabCtx, u)
-			if err != nil {
-				results <- result{i, fmt.Errorf("capture %s: %w", u, err)}
-				return
+	// --- 5. Take screenshots ---
+	if len(urls) == 1 {
+		// Single URL: use the browser's initial tab directly
+		log.Printf("[1/1] capturing: %s", urls[0])
+		buf, err := takeScreenshot(browserCtx, urls[0])
+		if err != nil {
+			log.Fatalf("capture %s: %v", urls[0], err)
+		}
+		outPath := outputPath(0)
+		if dir := filepath.Dir(outPath); dir != "." {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				log.Fatalf("create dir %s: %v", dir, err)
 			}
+		}
+		if err := os.WriteFile(outPath, buf, 0644); err != nil {
+			log.Fatalf("write %s: %v", outPath, err)
+		}
+		log.Printf("saved screenshot: %s", outPath)
+	} else {
+		// Multiple URLs: parallel capture with separate tabs
+		type result struct {
+			index int
+			err   error
+		}
+		results := make(chan result, len(urls))
+		sem := make(chan struct{}, *arguments.parallel)
+		for i, u := range urls {
+			go func(i int, u string) {
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
-			outPath := outputPath(i)
-			if dir := filepath.Dir(outPath); dir != "." {
-				if err := os.MkdirAll(dir, 0755); err != nil {
-					results <- result{i, fmt.Errorf("create dir %s: %w", dir, err)}
+				tabCtx, tabCancel := chromedp.NewContext(browserCtx)
+				defer tabCancel()
+
+				log.Printf("[%d/%d] capturing: %s", i+1, len(urls), u)
+				buf, err := takeScreenshot(tabCtx, u)
+				if err != nil {
+					results <- result{i, fmt.Errorf("capture %s: %w", u, err)}
 					return
 				}
+
+				outPath := outputPath(i)
+				if dir := filepath.Dir(outPath); dir != "." {
+					if err := os.MkdirAll(dir, 0755); err != nil {
+						results <- result{i, fmt.Errorf("create dir %s: %w", dir, err)}
+						return
+					}
+				}
+				if err := os.WriteFile(outPath, buf, 0644); err != nil {
+					results <- result{i, fmt.Errorf("write %s: %w", outPath, err)}
+					return
+				}
+				log.Printf("saved screenshot: %s", outPath)
+				results <- result{i, nil}
+			}(i, u)
+		}
+		for range urls {
+			if r := <-results; r.err != nil {
+				log.Fatal(r.err)
 			}
-			if err := os.WriteFile(outPath, buf, 0644); err != nil {
-				results <- result{i, fmt.Errorf("write %s: %w", outPath, err)}
-				return
-			}
-			log.Printf("saved screenshot: %s", outPath)
-			results <- result{i, nil}
-		}(i, u)
-	}
-	for range urls {
-		if r := <-results; r.err != nil {
-			log.Fatal(r.err)
 		}
 	}
 }
