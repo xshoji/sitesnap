@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -45,12 +44,13 @@ func (s *stringSlice) Set(v string) error {
 var version = "dev"
 
 const (
-	Req = "\x1b[33m(required)\x1b[0m "
+	Req        = "\x1b[33m(required)\x1b[0m "
+	UsageDummy = "########"
 	// maxPhysicalDim is Chrome's GPU texture limit in physical pixels.
 	// The actual CSS pixel limit depends on deviceScaleFactor.
 	maxPhysicalDim int64 = 16384
 	// Shutdown timeout constants for signal handling
-	cleanupTimeout        = 10 * time.Second
+	cleanupTimeout         = 10 * time.Second
 	closeAllTargetsTimeout = 5 * time.Second
 )
 
@@ -73,24 +73,24 @@ var (
 		reUseProfile   *bool
 		parallel       *int
 	}{
-		flag.String("o", "" /*    */, Req+"Output path of screenshot (with multiple URLs, auto-numbered: <base>_001.png, _002.png, ...)"),
-		flag.String("q", "" /*    */, "Query selector. Screenshot the first matching element. ( e.g. -q=\".className#id\" )"),
-		flag.String("p", "" /*    */, "Chrome profile directory to copy. (e.g. -p=\"~/Library/Application Support/Google/Chrome/Default\")."),
-		flag.Int("w", 3 /*        */, "Wait seconds after page navigation before taking screenshot"),
-		flag.Int64("wi", 1280 /*  */, "Viewport width (affects page layout, e.g. responsive design). Without -q, this is the output image width"),
-		flag.Int64("he", 860 /*   */, "Viewport height (affects page layout, e.g. responsive design). Without -q, this is the output image height"),
-		flag.Bool("f", false /*   */, "\nEnable full screenshot mode"),
-		flag.Bool("b", false /*   */, "\nAdd browser-style address bar to the top of screenshot"),
-		flag.Bool("d", false /*   */, "\nEnable debug mode"),
-		flag.Bool("n", false /*   */, "\nDisable headless mode"),
-		flag.Bool("r", false /*   */, "\nReuse cached profile (do not delete after execution)"),
-		flag.Int("t", runtime.NumCPU(), "Max number of parallel tabs for screenshot capture"),
+		defineFlagValue("o", "output" /*       */, Req+"Output path of screenshot (with multiple URLs, auto-numbered: <base>_001.png, _002.png, ...)", "", flag.String, flag.StringVar),
+		defineFlagValue("q", "query" /*        */, "Query selector. Screenshot the first matching element. ( e.g. -q=\".className#id\" )", "", flag.String, flag.StringVar),
+		defineFlagValue("p", "profile" /*      */, "Chrome profile directory to copy. (e.g. -p=\"~/Library/Application Support/Google/Chrome/Default\").", "", flag.String, flag.StringVar),
+		defineFlagValue("w", "wait" /*         */, "Wait seconds after page navigation before taking screenshot", 3, flag.Int, flag.IntVar),
+		defineFlagValue("W", "width" /*        */, "Viewport width (affects page layout, e.g. responsive design). Without -q, this is the output image width", int64(1280), flag.Int64, flag.Int64Var),
+		defineFlagValue("H", "height" /*       */, "Viewport height (affects page layout, e.g. responsive design). Without -q, this is the output image height", int64(860), flag.Int64, flag.Int64Var),
+		defineFlagValue("f", "full" /*         */, "Enable full screenshot mode", false, flag.Bool, flag.BoolVar),
+		defineFlagValue("b", "address-bar" /*  */, "Add browser-style address bar to the top of screenshot", false, flag.Bool, flag.BoolVar),
+		defineFlagValue("d", "debug" /*        */, "Enable debug mode", false, flag.Bool, flag.BoolVar),
+		defineFlagValue("n", "no-headless" /*  */, "Disable headless mode", false, flag.Bool, flag.BoolVar),
+		defineFlagValue("r", "reuse" /*        */, "Reuse cached profile (do not delete after execution)", false, flag.Bool, flag.BoolVar),
+		defineFlagValue("t", "parallel" /*     */, "Max number of parallel tabs for screenshot capture", runtime.NumCPU(), flag.Int, flag.IntVar),
 	}
 )
 
 func init() {
-	flag.Var(&urls, "u", Req+"URL (can be specified multiple times, e.g. -u \"https://xxxx/\" -u \"https://yyyy/\")")
-	flag.Var(&chromeFlags, "c", "Extra Chrome flag as key=value (can be specified multiple times, e.g. -c \"lang=ja\" -c \"disable-extensions\").")
+	defineFlagSlice("u", "url", Req+"URL (can be specified multiple times, e.g. -u \"https://xxxx/\" -u \"https://yyyy/\")", &urls)
+	defineFlagSlice("c", "chrome-flag", "Extra Chrome flag as key=value (can be specified multiple times, e.g. -c \"lang=ja\" -c \"disable-extensions\").", &chromeFlags)
 	flag.Usage = customUsage(commandDescription)
 }
 
@@ -750,21 +750,67 @@ func logSettings(profileCacheDir string) {
 	}
 }
 
-// Common function
+// =======================================
+// flag Utils
+// =======================================
 
-func customUsage(description string) func() {
-	optionFieldWidth := "16" // Recommended width = general: 16, bool only: 5
-	b := new(bytes.Buffer)
-	func() { flag.CommandLine.SetOutput(b); flag.PrintDefaults(); flag.CommandLine.SetOutput(nil) }()
-	return func() {
-		re := regexp.MustCompile(`(?m)^ +(-\S+)(?: (\S+))?\n*(\s+)(.*)\n`)
-		usages := strings.Split(re.ReplaceAllStringFunc(b.String(), func(m string) string {
-			valueType := strings.ReplaceAll("<"+strings.TrimSpace(re.FindStringSubmatch(m)[2])+">", "<>", "")
-			return fmt.Sprintf("  %-"+optionFieldWidth+"s %s\n", re.FindStringSubmatch(m)[1]+" "+valueType, re.FindStringSubmatch(m)[4])
-		}), "\n")
-		sort.SliceStable(usages, func(i, j int) bool { return strings.Contains(usages[i], Req) && !strings.Contains(usages[j], Req) })
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [OPTIONS]\n  version: %s\n\n", func() string { e, _ := os.Executable(); return filepath.Base(e) }(), version)
-		fmt.Fprintf(flag.CommandLine.Output(), "Description:\n  %s\n\n", description)
-		fmt.Fprintf(flag.CommandLine.Output(), "Options:\n%s", strings.Join(usages, "\n"))
+// defineFlagSlice registers a stringSlice flag with both short and long names.
+func defineFlagSlice(short, long, description string, s *stringSlice) {
+	flagUsage := short + UsageDummy + description
+	flag.Var(s, long, flagUsage)
+	flag.Var(s, short, UsageDummy)
+}
+
+// Helper function for flag
+func defineFlagValue[T comparable](short, long, description string, defaultValue T, flagFunc func(name string, value T, usage string) *T, flagVarFunc func(p *T, name string, value T, usage string)) *T {
+	flagUsage := short + UsageDummy + description
+	var zero T
+	if defaultValue != zero {
+		flagUsage = flagUsage + fmt.Sprintf(" (default %v)", defaultValue)
 	}
+	f := flagFunc(long, defaultValue, flagUsage)
+	flagVarFunc(f, short, defaultValue, UsageDummy)
+	return f
+}
+
+// Custom usage message
+func customUsage(description string) func() {
+	return func() {
+		optionsUsage, requiredOptionExample := getOptionsUsage(false)
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s %s[OPTIONS]\n\n", func() string { e, _ := os.Executable(); return filepath.Base(e) }(), requiredOptionExample)
+		fmt.Fprintf(flag.CommandLine.Output(), "Description:\n  %s\n\n", description)
+		fmt.Fprintf(flag.CommandLine.Output(), "Options:\n%s", optionsUsage)
+	}
+}
+
+// Get options usage message
+func getOptionsUsage(currentValue bool) (string, string) {
+	requiredOptionExample := ""
+	optionNameWidth := 0
+	usages := make([]string, 0)
+	getType := func(v string) string {
+		return strings.NewReplacer("*main.stringSlice", "<string>", "*flag.boolValue", "", "*flag.", "<", "Value", ">").Replace(v)
+	}
+	flag.VisitAll(func(f *flag.Flag) {
+		optionNameWidth = max(optionNameWidth, len(fmt.Sprintf("%s %s", f.Name, getType(fmt.Sprintf("%T", f.Value))))+4)
+	})
+	flag.VisitAll(func(f *flag.Flag) {
+		if f.Usage == UsageDummy {
+			return
+		}
+		value := getType(fmt.Sprintf("%T", f.Value))
+		if currentValue {
+			value = f.Value.String()
+		}
+		short := strings.Split(f.Usage, UsageDummy)[0]
+		mainUsage := strings.Split(f.Usage, UsageDummy)[1]
+		if strings.Contains(mainUsage, Req) {
+			requiredOptionExample += fmt.Sprintf("--%s %s ", f.Name, value)
+		}
+		usages = append(usages, fmt.Sprintf("  -%-1s, --%-"+strconv.Itoa(optionNameWidth)+"s %s\n", short, f.Name+" "+value, mainUsage))
+	})
+	sort.SliceStable(usages, func(i, j int) bool {
+		return strings.Count(usages[i], Req) > strings.Count(usages[j], Req)
+	})
+	return strings.Join(usages, ""), requiredOptionExample
 }
