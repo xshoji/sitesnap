@@ -49,6 +49,9 @@ const (
 	// maxPhysicalDim is Chrome's GPU texture limit in physical pixels.
 	// The actual CSS pixel limit depends on deviceScaleFactor.
 	maxPhysicalDim int64 = 16384
+	// Shutdown timeout constants for signal handling
+	cleanupTimeout        = 10 * time.Second
+	closeAllTargetsTimeout = 5 * time.Second
 )
 
 var (
@@ -128,8 +131,21 @@ func main() {
 	go func() {
 		sig := <-sigCh
 		log.Printf("signal received: %v, shutting down...", sig)
-		cleanup()
-		os.Exit(0)
+		done := make(chan struct{})
+		go func() {
+			cleanup()
+			close(done)
+		}()
+		select {
+		case <-done:
+			os.Exit(0)
+		case <-time.After(cleanupTimeout):
+			log.Printf("cleanup timed out, forcing exit")
+			os.Exit(1)
+		case sig = <-sigCh:
+			log.Printf("second signal received: %v, forcing exit", sig)
+			os.Exit(1)
+		}
 	}()
 
 	// --- 3. Start browser (must be done before parallel tabs) ---
@@ -309,8 +325,20 @@ func newBrowserContext(userDataDir string) (context.Context, func()) {
 	var once sync.Once
 	shutdown := func() {
 		once.Do(func() {
-			// Close all tabs via CDP before shutting down to keep the session clean
-			closeAllTargets(browserCtx)
+			// Close all tabs via CDP before shutting down to keep the session clean.
+			// Use a short timeout to avoid blocking if Chrome is unresponsive.
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), closeAllTargetsTimeout)
+			defer closeCancel()
+			closeDone := make(chan struct{})
+			go func() {
+				closeAllTargets(browserCtx)
+				close(closeDone)
+			}()
+			select {
+			case <-closeDone:
+			case <-closeCtx.Done():
+				log.Printf("closeAllTargets timed out, forcing shutdown")
+			}
 			// Gracefully close Chrome via CDP to avoid "didn't shut down correctly" warning
 			if err := chromedp.Cancel(browserCtx); err != nil {
 				log.Printf("graceful browser close failed: %v", err)
